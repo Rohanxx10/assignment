@@ -9,7 +9,7 @@ A high-performance Spring Boot microservice acting as a central API gateway and 
 | Layer | Technology |
 |-------|-----------|
 | Language | Java 17 |
-| Framework | Spring Boot 3.x |
+| Framework | Spring Boot 3.5 |
 | Database | PostgreSQL 15 |
 | Cache / Lock Store | Redis 7 (Lettuce) |
 | ORM | Hibernate / JPA |
