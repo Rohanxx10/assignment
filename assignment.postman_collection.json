@@ -1,0 +1,225 @@
+{
+  "info": {
+    "_postman_id": "56f54141-9075-4699-b348-30ed2b07800b",
+    "name": "assignment",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "53197670",
+    "_collection_link": "https://go.postman.co/collection/53197670-56f54141-9075-4699-b348-30ed2b07800b?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "create-user",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"username\": \"rahul\",\r\n  \"isPremium\": true\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/user",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "user"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create bot",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"name\": \"AI Bot\",\r\n  \"personaDescription\": \"Helpful assistant\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/bot",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "bot"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create post",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"authorId\": \"1e15a6dd-7026-4c3a-a4d5-f20eae1d1b9e\",\r\n  \"authorType\":\"BOT\",\r\n  \"content\": \"first post by Bot\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/post",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "post"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "add comment",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.environment.set(\"botId\", pm.variables.replaceIn(\"{{$randomUUID}}\"));\r",
+              "pm.environment.set(\"i\", pm.info.iteration);"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"authorId\": \"65254e79-8a1f-4cc1-bbfd-5f0ee5b692ca\",\r\n  \"authorType\": \"BOT\",\r\n  \"content\": \"Nice post!\",\r\n  \"parentId\": null,\r\n  \"targetUserId\":\"b35892e7-351a-4075-b77a-a4f77a9b3d36\"\r\n \r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/posts/a135c65c-f332-47e0-abc6-fbc9ea502e84/comments",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "posts",
+            "a135c65c-f332-47e0-abc6-fbc9ea502e84",
+            "comments"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "HorizontalCap",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.environment.set(\"botId\", crypto.randomUUID());\r",
+              "pm.environment.set(\"i\", pm.info.iteration + 1);"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"authorId\": \"{{botId}}\",\r\n  \"authorType\": \"BOT\",\r\n  \"content\": \"Nice post {{i}}\",\r\n  \"parentId\": null,\r\n  \"targetUserId\": \"{{userId}}\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/posts/{{postId}}/comments",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "posts",
+            "{{postId}}",
+            "comments"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "like",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"userId\":\"1e15a6dd-7026-4c3a-a4d5-f20eae1d1b9e\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/posts/{{postId}}/like",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "posts",
+            "{{postId}}",
+            "like"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
