@@ -9,7 +9,7 @@ A high-performance Spring Boot microservice acting as a central API gateway and 
 | Layer | Technology |
 |-------|-----------|
 | Language | Java 17 |
-| Framework | Spring Boot 3.5 |
+| Framework | Spring Boot 3.x |
 | Database | PostgreSQL 15 |
 | Cache / Lock Store | Redis 7 (Lettuce) |
 | ORM | Hibernate / JPA |
@@ -45,7 +45,7 @@ Server starts at `http://localhost:8080`.
 | `POST` | `/api/posts` | Create a new post |
 | `POST` | `/api/posts/{postId}/comments` | Add a comment (bot guardrails enforced) |
 | `POST` | `/api/posts/{postId}/like` | Like a post (+20 virality) |
-| `GET` | `/api/posts/{postId}/stats` | Virality score & bot count |
+| `GET`  | `/api/posts/{postId}/stats` | Virality score & bot count |
 | `POST` | `/api/v1/user` | Register a user |
 | `POST` | `/api/v1/bot` | Register a bot |
 
@@ -55,29 +55,37 @@ Server starts at `http://localhost:8080`.
 
 > This section explains exactly how the three Redis guardrails guarantee thread safety under concurrent load.
 
-The core principle: **all state lives in Redis, never in JVM memory**. No `synchronized` blocks, no `HashMap`, no `static` variables. This means the guardrails work correctly even across multiple horizontally-scaled application instances.
+The core principle: **all state lives in Redis, never in JVM memory**. No `synchronized` blocks, no `HashMap`, no `static` variables. This makes the guardrails correct even across multiple horizontally-scaled application instances.
 
 ---
 
 ### Lock 1 — Horizontal Cap (max 100 bot replies per post)
 
 **Redis key:** `post:{id}:bot_count`  
-**Redis command:** `INCR`
+**Mechanism: Lua script executed via `RedisTemplate.execute()`**
+
+```lua
+-- Executed atomically as a single Redis command
+local current = redis.call('INCR', KEYS[1])
+if current > tonumber(ARGV[1]) then
+    redis.call('DECR', KEYS[1])
+    return -1
+end
+return current
+```
 
 ```java
-public void checkAndIncrementBotCount(String postId) {
-    String key = RedisKeys.botCount(postId);
-    Long newCount = redisTemplate.opsForValue().increment(key);
+DefaultRedisScript<Long> script = new DefaultRedisScript<>(LUA_INCR_CAP, Long.class);
+Long result = redisTemplate.execute(script, List.of(key), String.valueOf(BOT_HORIZONTAL_CAP));
 
-    if (newCount != null && newCount > RedisKeys.BOT_HORIZONTAL_CAP) {
-        redisTemplate.opsForValue().decrement(key);
-        throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, ...);
-    }
+if (result == null || result == -1L) {
+    throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, ...);
 }
 ```
 
-**Why it's thread-safe:**  
-Redis `INCR` is a single-threaded, atomic operation — it increments the counter and returns the new value in one indivisible step. Under 200 concurrent bot requests, Redis processes each `INCR` serially. The 101st request will always receive the value `101`, trigger the decrement, and be rejected. The PostgreSQL write only happens **after** the Redis check passes, so the database will never exceed 100 bot rows per post.
+**Why Lua guarantees thread safety:**
+
+A naive `INCR → check → DECR` across three separate Redis calls has a race window: two threads can both `INCR` to 100, both pass the check, and both write to the database — resulting in 101 rows. Lua scripts run **atomically inside Redis**. The entire script — increment, compare, and conditional decrement — is executed as a single, non-interruptible unit. Redis processes no other command between the `INCR` and the `if` check. Under 200 concurrent bot requests the 101st request will always receive `-1` from the script and be rejected before any database write occurs.
 
 ---
 
@@ -87,35 +95,34 @@ Redis `INCR` is a single-threaded, atomic operation — it increments the counte
 **Redis command:** `SET NX EX 600`
 
 ```java
-public void checkAndSetCooldown(String botId, String userId) {
-    String key = RedisKeys.cooldown(botId, userId);
-    Boolean wasAbsent = redisTemplate.opsForValue()
-        .setIfAbsent(key, "1", Duration.ofSeconds(600));
+Boolean wasAbsent = redisTemplate.opsForValue()
+    .setIfAbsent(key, "1", Duration.ofSeconds(RedisKeys.COOLDOWN_TTL_SECS));
 
-    if (Boolean.FALSE.equals(wasAbsent)) {
-        throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, ...);
-    }
+if (Boolean.FALSE.equals(wasAbsent)) {
+    Long ttl = redisTemplate.getExpire(key);
+    throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+        "Bot " + botId + " is on cooldown. Retry in " + ttl + " seconds.");
 }
 ```
 
 **Why it's thread-safe:**  
-`setIfAbsent` maps to Redis `SET key value NX EX 600` — **NX** (Not eXists) and **EX** (expire) are applied in a single atomic command. There is no gap between "check if key exists" and "set the TTL" during which a race condition could occur. The first bot request claiming the slot wins; all subsequent requests within the 10-minute window are rejected instantly.
+`setIfAbsent` maps directly to the Redis `SET key value NX EX 600` command. `NX` (Not eXists) and `EX` (expire) are applied in a **single atomic command** — there is no gap between "check if key exists" and "write the TTL" during which a race could occur. The first request claiming the slot wins atomically; all subsequent requests within the 10-minute window are rejected instantly.
 
 ---
 
 ### Lock 3 — Vertical Cap (max 20 nesting levels)
 
-**No Redis key needed.**
+**No Redis needed.**
 
 ```java
-depth = parent.getDepthLevel() + 1;
+int depth = parent.getDepthLevel() + 1;
 if (depth > 20) {
     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Max depth is 20");
 }
 ```
 
 **Why it's thread-safe:**  
-`depth_level` on a comment is written **once at creation and never updated**. Reading a parent's depth inside a `@Transactional` method gives a consistent, immutable value. There is no concurrent-write risk because the parent's depth cannot change between reads.
+`depth_level` is written **once at comment creation and never mutated**. Reading a parent's depth inside a `@Transactional` method gives a consistent, immutable value. There is no concurrent-write risk because a parent's depth cannot change between reads.
 
 ---
 
@@ -123,9 +130,10 @@ if (depth > 20) {
 
 | Approach | Problem |
 |----------|---------|
-| `synchronized` / `ReentrantLock` | Scoped to a single JVM — breaks with multiple instances |
-| `static HashMap` counter | In-memory, not shared — each pod has its own counter |
-| **Redis atomic commands** | Single-threaded server, shared across all instances — correct by design |
+| `synchronized` / `ReentrantLock` | Scoped to one JVM — breaks with multiple instances |
+| `static HashMap` counter | In-memory per pod — each instance has its own counter |
+| **Redis `SET NX EX`** | Single-command atomic — correct across all instances |
+| **Redis Lua script** | Multi-step logic executed atomically — zero race window |
 
 ---
 
@@ -134,7 +142,7 @@ if (depth > 20) {
 | Key | Type | TTL | Purpose |
 |-----|------|-----|---------|
 | `post:{id}:virality_score` | String (int) | None | Running virality score |
-| `post:{id}:bot_count` | String (int) | None | Atomic bot-reply counter |
+| `post:{id}:bot_count` | String (int) | None | Atomic bot-reply counter (Lua-guarded) |
 | `cooldown:bot_{id}:human_{id}` | String | 600s | Per-bot-per-user interaction lock |
 | `notif_cooldown:user_{id}` | String | 900s | Notification rate-limit per user |
 | `user:{id}:pending_notifs` | List | None | Batched notification queue |
